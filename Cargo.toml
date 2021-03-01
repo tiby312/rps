@@ -8,8 +8,9 @@ edition = "2018"
 
 [dependencies]
 egaku2d = "0.5"
-broccoli = "*"
+broccoli={git="https://github.com/tiby312/broccoli"}
 axgeom="*"
 duckduckgeo ={git="https://github.com/tiby312/duckduckgeo"}
 rayon-core="*"
 num_cpus="*"
+seq_impulse={path="../seq_impulse"}

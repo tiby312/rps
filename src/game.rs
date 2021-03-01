@@ -3,20 +3,52 @@ use duckduckgeo;
 
 use axgeom::Rect;
 
-#[derive(Debug,Copy,Clone)]
-pub enum Team{
-    ROCK,
-    PAPER,
-    SCISSOR
-}
+
+pub const ROCK:Team=Team(0b100001);
+pub const PAPER:Team=Team(0b001010);
+pub const SCISSOR:Team=Team(0b010100);
+
+#[derive(Copy,Clone,Debug,Eq,PartialEq)]
+pub struct Team(u8);
+
 
 #[derive(Copy, Clone, Debug)]
 pub struct Bot {
     pub team:Team,
     pub pos: Vec2<f32>,
-    pub vel: Vec2<f32>,
-    pub acc: Vec2<f32>,
+    pub vel: Vec2<f32>
 }
+
+
+#[derive(Debug)]
+enum Res{
+    Equal,
+    Attack,
+    Avoid
+}
+
+//returns whether or not to attack or avoid b from the perspective of a.
+fn func(a:Team,b:Team)->Res{
+    let (Team(a),Team(b))=(a,b);
+    if a==b
+    {
+        Res::Equal
+    }
+    else
+    {
+        if (a & (b<<3)) != 0
+        {
+            Res::Attack
+        }
+        else
+        {
+            Res::Avoid
+        }
+    }
+}
+
+
+
 
 impl Bot {
     pub fn new(team:Team,pos: Vec2<f32>) -> Bot {
@@ -25,73 +57,116 @@ impl Bot {
         Bot {
             team,
             pos,
-            acc: z,
             vel: z,
         }
     }
 
-    pub fn solve(&mut self, b: &mut Self, radius: f32) -> f32 {
-        let diff = b.pos - self.pos;
+    pub fn solve(&mut self, b: &mut Self, radius: f32){
+        let a=self;
+
+
+
+        let diff = b.pos - a.pos;
 
         let dis_sqr = diff.magnitude2();
 
         if dis_sqr < 0.00001 {
-            self.acc += vec2(1.0, 0.0);
-            b.acc -= vec2(1.0, 0.0);
-            return 0.0;
+            a.vel += vec2(1.0, 0.0);
+            b.vel -= vec2(1.0, 0.0);
+            return;
         }
 
-        if dis_sqr >= (2. * radius) * (2. * radius) {
-            return 0.0;
+        if dis_sqr >= (2. * RADIUS_PROXY) * (2. * RADIUS_PROXY) {
+            return;
         }
 
         let dis = dis_sqr.sqrt();
 
-        //d is zero if barely touching, 1 is overlapping.
-        //d grows linearly with position of bots
-        let d = 1.0 - (dis / (radius * 2.));
+        let norm=diff/dis;
 
-        let spring_force_mag = -(d - 0.5) * 0.02;
-
-        let velociy_diff = b.vel - self.vel;
-        let damping_ratio = 0.00027;
-        let spring_dampen = velociy_diff.dot(diff) * (1. / dis) * damping_ratio;
-
-        let spring_force = diff * (1. / dis) * (spring_force_mag + spring_dampen);
-
-        self.acc += spring_force;
-        b.acc -= spring_force;
-
-        spring_force_mag
+        let mag=(RADIUS_PROXY*2.0-dis)/(RADIUS_PROXY*2.0);
+        assert!(mag>=0.0,"{:?}",(mag,dis)); 
+        
+        let mag=mag*mag;
+        let mag=mag*0.1;
+        
+        match func(a.team,b.team){
+            Res::Attack=>{
+                let foo=norm*mag;
+                a.vel+=foo;
+                b.vel+=foo;
+            }
+            Res::Avoid=>{
+                let foo=norm*mag;
+                a.vel-=foo;
+                b.vel-=foo;
+            }
+            Res::Equal=>{
+                let foo=norm*0.003;
+                a.vel+=foo;
+                b.vel-=foo;
+            }
+        }
     }
 }
 
 
-pub fn make_demo(dim: Rect<f32>) -> Demo {
-    let radius = 10.0;
+pub const RADIUS:f32=8.0;
+pub const RADIUS_PROXY:f32=30.0;
 
+
+pub fn make_demo(dim: Rect<f32>) -> Demo {
     
+    let num_bots=1000;
+
     let mut bots:Vec<_>=crate::dists::rand2_iter(dim)
     .map(|[a, b]| axgeom::vec2(a as f32, b as f32))
     .enumerate()
     .map(|(i,a)| {
-        let t=if i<100{
-            Team::ROCK
-        }else if i<2000{
-            Team::SCISSOR
+        let t=if i<num_bots/3{
+            ROCK
+        }else if i<num_bots*2/3{
+            PAPER
         }else{
-            Team::PAPER
+            SCISSOR
         };
 
         Bot::new(t,a)
     })
-    .take(3000)
+    .take(num_bots)
     .collect();
     
+    let mut solver=seq_impulse::CollisionVelocitySolver::new();
+
     Demo::new(move |cursor, canvas, _check_naive| {
+
+        {
+         
+            let mut base=broccoli::container::TreeIndBase::new(&mut bots,|bot|{
+                let p = bot.pos;
+                let r = RADIUS;
+                Rect::new(p.x - r, p.x + r, p.y - r, p.y + r)
+            });
+            let mut tree=base.build();
+            use duckduckgeo::grid;
+            let g=grid::GridViewPort{spacing:50.0,origin:vec2(0.0,0.0)};
+            let walls=grid::Grid2D::new(vec2(5,5));
+            solver.solve(RADIUS*0.8,&g,&walls,&mut tree,|a|&a.pos,|a|&mut a.vel,|a,b|{
+                match func(a.team,b.team){
+                    Res::Attack=>{
+                        b.team=a.team
+                    }
+                    Res::Avoid=>{
+                        a.team=b.team
+                    }
+                    _=>{}
+                }
+            });
+        }
+
         let mut k = support::distribute(&mut bots, |bot| {
             let p = bot.pos;
-            let r = radius;
+            let r = RADIUS_PROXY;
             Rect::new(p.x - r, p.x + r, p.y - r, p.y + r)
         });
 
@@ -99,15 +174,12 @@ pub fn make_demo(dim: Rect<f32>) -> Demo {
 
         tree.find_colliding_pairs_mut_par(RayonJoin, move |a, b| {
             let (a, b) = (a.unpack_inner(), b.unpack_inner());
-            let _ = a.solve(b, radius);
+            a.solve(b, RADIUS_PROXY);
         });
 
         let vv = vec2same(100.0);
 
-        tree.for_all_in_rect_mut(&axgeom::Rect::from_point(cursor, vv), move |b| {
-            let b = b.unpack_inner();
-            let _ = duckduckgeo::repel_one(b.pos, &mut b.acc, cursor, 0.001, 100.0);
-        });
+
 
         tree.for_all_not_in_rect_mut(&dim, move |a| {
             let a = a.unpack_inner();
@@ -116,40 +188,42 @@ pub fn make_demo(dim: Rect<f32>) -> Demo {
 
         for b in bots.iter_mut() {
             b.pos += b.vel;
-            b.vel += b.acc;
-            b.acc = vec2same(0.0);
+            //b.vel.y+=0.01;
+            //b.vel=b.vel*0.999; //fake friction
         }
 
 
-        let rr=4.0;
         let mut circle = canvas.circles();
-        for bot in bots[0..1000].iter() {
+        for bot in bots.iter().filter(|x|x.team==ROCK) {
             circle.add(bot.pos.into());
         }
         circle
-            .send_and_uniforms(canvas, rr)
+            .send_and_uniforms(canvas, RADIUS)
             .with_color([1.0, 0.0, 0.0, 0.5])
             .draw();
 
 
         let mut circle = canvas.circles();
-        for bot in bots[1000..2000].iter() {
+        for bot in bots.iter().filter(|x|x.team==PAPER) {
             circle.add(bot.pos.into());
         }
         circle
-            .send_and_uniforms(canvas, rr)
+            .send_and_uniforms(canvas, RADIUS)
             .with_color([0.0, 1.0, 0.0, 0.5])
             .draw();
             
 
 
         let mut circle = canvas.circles();
-        for bot in bots[2000..3000].iter() {
+        for bot in bots.iter().filter(|x|x.team==SCISSOR) {
             circle.add(bot.pos.into());
         }
         circle
-            .send_and_uniforms(canvas, rr)
-            .with_color([0.0, 0.0, 1.0, 0.5])
+            .send_and_uniforms(canvas, RADIUS)
+            .with_color([0.3, 0.3, 1.0, 0.5])
             .draw();
     })
 }
+
+
+
