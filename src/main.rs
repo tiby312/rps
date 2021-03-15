@@ -58,11 +58,11 @@ fn main() {
         .build_global()
         .unwrap();
     
-    let area = vec2(800, 600);
+    let area = vec2(800*2, 400*2);
 
     let events_loop = glutin::event_loop::EventLoop::new();
 
-    let mut sys = egaku2d::WindowedSystem::new([800, 600], &events_loop, "broccoli demo");
+    let mut sys = egaku2d::WindowedSystem::new([800*2, 400*2], &events_loop, "broccoli demo");
     //let mut sys=very_simple_2d::FullScreenSystem::new(&events_loop);
     //sys.set_viewport_min(600.);
 

@@ -102,13 +102,16 @@ impl Bot {
                 b.vel-=foo;
             }
             Res::Equal=>{
+                /*
                 let foo=norm*0.003;
                 a.vel+=foo;
                 b.vel-=foo;
+                */
             }
         }
     }
 }
+
 
 
 pub const RADIUS:f32=8.0;
@@ -164,18 +167,35 @@ pub fn make_demo(dim: Rect<f32>) -> Demo {
             });
         }
 
+
         let mut k = support::distribute(&mut bots, |bot| {
             let p = bot.pos;
             let r = RADIUS_PROXY;
             Rect::new(p.x - r, p.x + r, p.y - r, p.y + r)
         });
 
+
+        broccoli::query::nbody::naive_mut(broccoli::pmut::PMut::new(&mut k),|a,b|{
+            let (a, b) = (a.unpack_inner(), b.unpack_inner());
+
+            let mass=1.0;
+            let _ = duckduckgeo::gravitate(
+                [(a.pos, mass, &mut a.vel), (b.pos, mass, &mut b.vel)],
+                RADIUS,
+                2.0,
+            );
+        });
+
         let mut tree = broccoli::new_par(RayonJoin, &mut k);
 
+
+        
         tree.find_colliding_pairs_mut_par(RayonJoin, move |a, b| {
             let (a, b) = (a.unpack_inner(), b.unpack_inner());
             a.solve(b, RADIUS_PROXY);
         });
+        
+        
 
         let vv = vec2same(100.0);
 
@@ -189,7 +209,7 @@ pub fn make_demo(dim: Rect<f32>) -> Demo {
         for b in bots.iter_mut() {
             b.pos += b.vel;
             //b.vel.y+=0.01;
-            //b.vel=b.vel*0.999; //fake friction
+            b.vel=b.vel*0.99; //fake friction
         }
 
 
